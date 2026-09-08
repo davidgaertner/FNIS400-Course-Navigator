@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A date-aware guide to the FNIS 400 community research practicum.">
+  <meta name="theme-color" content="#1A3C40">
+  <title>FNIS 400 Practicum Course Navigator</title>
+  <link rel="stylesheet" href="css/styles.css?v=20260907-fnis1">
+  <script src="js/course-data.js?v=20260907-canvas1" defer></script>
+  <script src="js/app.js?v=20260907-gate1" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to course position</a>
+
+  <header class="site-header">
+    <div class="page-shell header-inner">
+      <div class="fnis-header-brand">
+        <div class="fnis-logo-frame">
+          <img id="fnis-logo" class="fnis-logo" data-src="assets/fnis-logo.png?v=20260907-artwork1" alt="First Nations and Indigenous Studies logo" hidden>
+          <span id="fnis-logo-fallback" class="fnis-logo-fallback" aria-hidden="true">FNIS</span>
+        </div>
+        <div>
+          <p class="institution-name">First Nations and Indigenous Studies</p>
+          <h1>FNIS 400 Practicum Course Navigator</h1>
+          <p class="course-code">2026–27 Community Research Practicum</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div id="preview-bar" class="preview-bar" hidden>
+    <div class="page-shell preview-inner">
+      <div class="preview-heading">
+        <strong>Instructor preview</strong>
+        <span>Simulate the course calendar</span>
+      </div>
+      <div class="preview-controls">
+        <label for="preview-date">View date</label>
+        <input id="preview-date" type="date">
+        <button id="today-button" class="button button-quiet" type="button">Today</button>
+        <label class="visually-hidden" for="preview-shortcut">Jump to a key course date</label>
+        <select id="preview-shortcut" aria-label="Jump to a key course date">
+          <option value="">Key date…</option>
+          <option value="2026-09-10">Sep 10 · Orientation</option>
+          <option value="2026-09-18">Sep 18 · Preliminary interests</option>
+          <option value="2026-09-21">Sep 21 · Professional materials</option>
+          <option value="2026-09-23">Sep 23 · Methods</option>
+          <option value="2026-09-25">Sep 25 · Placement confirmation</option>
+          <option value="2026-09-28">Sep 28 · Partnership + scoping</option>
+          <option value="2026-10-05">Oct 5 · Bullseye</option>
+          <option value="2026-10-14">Oct 14 · Research Ethics</option>
+          <option value="2026-10-19">Oct 19 · Pathway</option>
+          <option value="2026-10-23">Oct 23 · Checkpoint 1</option>
+          <option value="2026-10-26">Oct 26 · Case Conference</option>
+          <option value="2026-10-29">Oct 29 · Proposal clearance</option>
+          <option value="2026-11-02">Nov 2 · Complete package</option>
+          <option value="2026-11-04">Nov 4 · Quality Control</option>
+          <option value="2026-11-12">Nov 12 · Final assembly</option>
+          <option value="2026-11-13">Nov 13 · Final ethics/readiness gate</option>
+          <option value="2026-11-17">Nov 17 · X̱wi7x̱wa prep</option>
+          <option value="2027-01-11">Jan 11 · Foundation Group A</option>
+          <option value="2027-01-18">Jan 18 · Foundation Group B</option>
+          <option value="2027-01-30">Jan 30 · Milestone preparation</option>
+          <option value="2027-02-01">Feb 1 · Milestone</option>
+          <option value="2027-03-08">Mar 8 · Partner review</option>
+          <option value="2027-03-25">Mar 25 · Handoff</option>
+          <option value="2027-04-07">Apr 7 · Presentation</option>
+          <option value="2027-04-12">Apr 12 · Closeout</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <main id="main-content" class="page-shell" tabindex="-1">
+    <section class="hero-grid" aria-labelledby="position-title">
+      <article class="position-card">
+        <p class="eyebrow">Where you are in the practicum</p>
+        <p id="current-date" class="current-date"></p>
+        <h2 id="position-title"></h2>
+        <p id="stage-description" class="stage-description"></p>
+        <p id="term2-notice" class="term2-notice" hidden></p>
+        <p class="guidance-note">This guidance reflects the course calendar, not your individual project progress.</p>
+      </article>
+
+      <aside id="next-card" class="next-card" aria-label="What happens next">
+        <section class="next-panel" aria-labelledby="next-heading">
+          <p class="eyebrow" id="next-heading">Next significant date</p>
+          <div id="next-event"></div>
+        </section>
+        <section class="next-panel next-panel-gate" aria-labelledby="next-gate-heading">
+          <p class="eyebrow" id="next-gate-heading">Next project gate / dependency</p>
+          <div id="next-gate"></div>
+        </section>
+      </aside>
+    </section>
+
+    <section id="pathway-panel" class="pathway-panel" aria-labelledby="pathway-title" hidden>
+      <div id="pathway-choice" class="pathway-choice">
+        <label id="pathway-title" for="pathway-select">My confirmed project pathway</label>
+        <p id="pathway-help">Choose the route confirmed with the teaching team. If your pathway has not yet been confirmed, select “Not yet confirmed.” This local setting does not create, approve, or change the formal pathway.</p>
+        <select id="pathway-select" aria-describedby="pathway-help">
+          <option value="not-confirmed">Not yet confirmed</option>
+          <option value="behavioural">Behavioural Research</option>
+          <option value="archival">Archival Research</option>
+          <option value="program-evaluation">Program Evaluation</option>
+          <option value="no-formal-review">No Formal Review</option>
+        </select>
+        <p class="local-note">Saved only on this browser or device. Nothing is transmitted or treated as an official course record.</p>
+      </div>
+      <div class="project-condition" aria-live="polite" aria-atomic="true">
+        <p class="eyebrow">Project condition</p>
+        <p id="pathway-status" class="condition-status"></p>
+        <p id="pathway-guidance" class="condition-guidance"></p>
+        <div id="dependency-panel" class="dependency-panel" hidden>
+          <p class="dependency-title">Blocked / dependent work</p>
+          <ul id="dependency-list" class="plain-list"></ul>
+          <p class="blocked-principle">Blocked work is information.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-block positioning-section" aria-labelledby="where-should-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">Course positioning</p>
+          <h2 id="where-should-title">What should be happening now?</h2>
+        </div>
+        <p>Calendar expectations are general guideposts. If your project is at a different stage, use the upcoming gates to assess what depends on it and contact the teaching team if the plan needs to change.</p>
+      </div>
+      <div class="positioning-grid">
+        <article class="positioning-column">
+          <h3><span class="column-number">01</span> By now</h3>
+          <ul id="by-now-list" class="plain-list"></ul>
+        </article>
+        <article class="positioning-column current-work">
+          <h3><span class="column-number">02</span> Right now</h3>
+          <ul id="right-now-list" class="plain-list"></ul>
+        </article>
+        <article class="positioning-column">
+          <h3><span class="column-number">03</span> Coming up</h3>
+          <ol id="coming-up-list" class="coming-list"></ol>
+        </article>
+      </div>
+    </section>
+
+    <section class="section-block journey-section" aria-labelledby="journey-title">
+      <div class="section-heading compact">
+        <div>
+          <p class="section-kicker">September to April</p>
+          <h2 id="journey-title">The full practicum journey</h2>
+        </div>
+        <p>Select a stage to see its role in the practicum.</p>
+      </div>
+      <ol id="journey-list" class="journey-list"></ol>
+      <div id="journey-detail" class="journey-detail" aria-live="polite"></div>
+    </section>
+
+    <div class="context-grid">
+      <section class="section-block resources-section" aria-labelledby="resources-title">
+        <div class="section-heading compact">
+          <div>
+            <p class="section-kicker">Canvas materials</p>
+            <h2 id="resources-title">Useful right now</h2>
+          </div>
+        </div>
+        <p id="resources-intro" class="section-intro"></p>
+        <ul id="resources-list" class="resources-list"></ul>
+      </section>
+
+      <section class="section-block upcoming-section" aria-labelledby="upcoming-title">
+        <div class="section-heading compact">
+          <div>
+            <p class="section-kicker">Looking ahead</p>
+            <h2 id="upcoming-title">Upcoming dates</h2>
+          </div>
+        </div>
+        <ol id="upcoming-list" class="event-list"></ol>
+      </section>
+    </div>
+
+    <section class="timeline-section" aria-labelledby="timeline-title">
+      <details id="timeline-details">
+        <summary id="timeline-toggle" aria-expanded="false" aria-controls="full-timeline">
+          <span>
+            <span class="section-kicker">Course Summary</span>
+            <span id="timeline-title" class="summary-title">Full Course Timeline</span>
+          </span>
+          <span id="timeline-action" class="summary-action">View all dates +</span>
+        </summary>
+        <div id="full-timeline" class="full-timeline"></div>
+      </details>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="page-shell footer-inner">
+      <p><strong>FNIS 400 Practicum Course Navigator</strong><br>First Nations and Indigenous Studies<br><span class="footer-guidance">2026–27 Community Research Practicum</span></p>
+      <p>Course data updated <span id="last-updated"></span>.</p>
+    </div>
+  </footer>
+
+  <p id="date-announcer" class="visually-hidden" aria-live="polite" aria-atomic="true"></p>
+</body>
+</html>
