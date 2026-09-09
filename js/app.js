@@ -3,473 +3,306 @@
 
   const data = window.FNIS400;
   if (!data) return;
-
-  const { COURSE_CONFIG, COURSE_STAGES, COURSE_EVENTS, JOURNEY_STAGE_IDS, PROJECT_PATHWAYS, utils } = data;
-  const TYPE_LABELS = {
-    module: "Module start",
-    seminar: "Seminar",
-    activity: "Activity",
-    submission: "Submission",
-    pulse: "Project Pulse",
-    break: "Break",
-    presentation: "Presentation",
-    "project-gate": "Project gate"
-  };
-  const RESOURCE_TYPE_LABELS = {
-    page: "Page", assignment: "Assignment", module: "Module", template: "Template", external: "External resource"
-  };
+  const {
+    COURSE_CONFIG, COURSE_STAGES, COURSE_EVENTS, COURSE_RESOURCES, PROJECT_PATHWAYS,
+    PROJECT_STATE_DEFINITIONS, DEFAULT_PROJECT_STATE, JOURNEY_STAGES, utils
+  } = data;
+  const RESOURCE_TYPE_LABELS = { page: "Page", assignment: "Assignment", file: "File", module: "Module", template: "Template", external: "External resource" };
   const MONTH_NAMES = ["September", "October", "November", "December", "January", "February", "March", "April"];
   const MONTH_KEYS = ["2026-09", "2026-10", "2026-11", "2026-12", "2027-01", "2027-02", "2027-03", "2027-04"];
-
-  let activeDate = utils.getVancouverToday();
-  let selectedPathway = "not-confirmed";
-  let selectedJourneyId = null;
   const query = new URLSearchParams(window.location.search);
   const previewMode = query.get("preview") === "1";
+  let activeDate = utils.getVancouverToday();
+  let selectedPathway = "not-confirmed";
+  let projectState = utils.normalizeProjectState(DEFAULT_PROJECT_STATE);
+  let selectedJourneyId = null;
 
   const byId = function (id) { return document.getElementById(id); };
-
   function create(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
     if (text !== undefined) node.textContent = text;
     return node;
   }
-
   function dateObject(isoDate) {
     const p = utils.parseDateParts(isoDate);
     return new Date(Date.UTC(p.year, p.month - 1, p.day, 12));
   }
-
   function formatDate(isoDate, options) {
-    return new Intl.DateTimeFormat("en-CA", Object.assign({
-      timeZone: "UTC", month: "long", day: "numeric", year: "numeric"
-    }, options || {})).format(dateObject(isoDate));
+    return new Intl.DateTimeFormat("en-CA", Object.assign({ timeZone: "UTC", month: "long", day: "numeric", year: "numeric" }, options || {})).format(dateObject(isoDate));
   }
-
   function formatEventDate(event, short) {
     if (!event.date) return "Date TBC";
-    const monthStyle = short ? "short" : "long";
-    const monthDayOptions = { month: monthStyle, day: "numeric", year: undefined };
-    const fullDateOptions = { month: monthStyle, day: "numeric" };
-    const timeSuffix = event.timeLabel ? " · " + event.timeLabel : (event.time === "12:00" ? " at noon" : "");
-    const start = formatDate(event.date, short ? monthDayOptions : fullDateOptions);
-    if (!event.endDate) {
-      return start + timeSuffix;
-    }
-    const startParts = utils.parseDateParts(event.date);
-    const endParts = utils.parseDateParts(event.endDate);
-    const sameYear = startParts.year === endParts.year;
-    const sameMonth = sameYear && startParts.month === endParts.month;
-    let range;
-    if (sameMonth) {
-      range = formatDate(event.date, monthDayOptions) + "–" + endParts.day + (short ? "" : ", " + startParts.year);
-    } else if (sameYear) {
-      range = formatDate(event.date, monthDayOptions) + " – " + formatDate(event.endDate, monthDayOptions) + (short ? "" : ", " + startParts.year);
-    } else {
-      range = formatDate(event.date, fullDateOptions) + " – " + formatDate(event.endDate, fullDateOptions);
-    }
-    return range + timeSuffix;
+    const options = { month: short ? "short" : "long", day: "numeric", year: short ? undefined : "numeric" };
+    const start = formatDate(event.date, options);
+    const suffix = event.timeLabel ? " · " + event.timeLabel : "";
+    if (event.openEnded) return start + " onward" + suffix;
+    if (!event.endDate) return start + suffix;
+    const a = utils.parseDateParts(event.date);
+    const b = utils.parseDateParts(event.endDate);
+    const range = a.year === b.year && a.month === b.month
+      ? formatDate(event.date, { month: short ? "short" : "long", day: "numeric", year: undefined }) + "–" + b.day + (short ? "" : ", " + a.year)
+      : start + " – " + formatDate(event.endDate, options);
+    return range + suffix;
   }
-
-  function getTypeLabel(event) { return event.gate ? "Project gate" : (TYPE_LABELS[event.type] || event.type); }
-
   function makeBadge(text, className) { return create("span", className, text); }
-
+  function eventTypeBadgeClass(type) { return "event-type event-type--" + String(type || "activity").replace(/[^a-z0-9-]/g, "-"); }
   function appendEventBadges(container, event, includeType) {
-    if (includeType && event.type !== "project-gate") container.appendChild(makeBadge(TYPE_LABELS[event.type] || event.type, "event-type"));
+    if (includeType && !event.gate) container.appendChild(makeBadge(utils.getTypeLabel(event.type), eventTypeBadgeClass(event.type)));
     if (event.weight) container.appendChild(makeBadge(event.weight + " assessment", "weight-badge"));
     if (event.gate) container.appendChild(makeBadge("Project gate", "gate-badge"));
-    if (event.status === "pending-confirmation") container.appendChild(makeBadge("Working date, pending final committee confirmation", "status-badge"));
-    if (event.status === "pathway-dependent") container.appendChild(makeBadge("Project-specific conditions", "status-badge"));
-    if (event.status === "readiness") container.appendChild(makeBadge("Course-level readiness", "status-badge"));
+    if (event.boundary) container.appendChild(makeBadge("Project boundary", "boundary-badge"));
+    if (event.provisional) container.appendChild(makeBadge(COURSE_CONFIG.provisionalLabel, "status-badge"));
     if (event.status === "tbc") container.appendChild(makeBadge("Date TBC", "status-badge"));
   }
 
-  function currentSeasonalGuidance(stage) {
-    const dated = (stage.dateGuidance || []).find(function (guidance) {
-      return (!guidance.from || activeDate >= guidance.from) && (!guidance.until || activeDate <= guidance.until);
-    });
-    if (dated) return dated;
-    const guidance = stage.seasonalGuidance;
-    return guidance && activeDate >= guidance.start && activeDate <= guidance.end ? guidance : null;
-  }
-
-  function renderHero(stage, nextEvent) {
+  function renderHero(stage) {
     byId("current-date").textContent = formatDate(activeDate, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
     byId("position-title").textContent = stage.title;
-    const seasonal = currentSeasonalGuidance(stage);
-    byId("stage-description").textContent = seasonal ? seasonal.note : stage.description;
-    const term2Notice = byId("term2-notice");
-    const showTerm2Notice = stage.term2Limited || (stage.id === "foundation" && activeDate >= "2027-01-06");
-    term2Notice.hidden = !showTerm2Notice;
-    term2Notice.textContent = showTerm2Notice ? COURSE_CONFIG.term2ScheduleNotice : "";
-
-    const nextContainer = byId("next-event");
-    nextContainer.replaceChildren();
-    if (!nextEvent) {
-      nextContainer.appendChild(create("p", "next-date", "Course timeline complete"));
-      nextContainer.appendChild(create("p", "next-title", "There are no further dated FNIS 400 activities in this calendar."));
-      return;
-    }
-
-    const inRange = nextEvent.endDate && activeDate > nextEvent.date && activeDate <= nextEvent.endDate;
-    const days = inRange ? 0 : utils.daysBetween(activeDate, nextEvent.date);
-    nextContainer.appendChild(create("p", "next-date", days === 0 ? "Today" : formatEventDate(nextEvent, false)));
-    nextContainer.appendChild(create("h3", "next-title", nextEvent.title));
-    if (nextEvent.details || nextEvent.context) nextContainer.appendChild(create("p", "next-detail", nextEvent.details || nextEvent.context));
-    const badges = create("div", "next-badges");
-    appendEventBadges(badges, nextEvent, false);
-    nextContainer.appendChild(badges);
-    let countdown = "Today";
-    if (inRange) countdown = "In progress";
-    else if (days === 1) countdown = "1 day away";
-    else if (days > 1) countdown = days + " days away";
-    nextContainer.appendChild(create("p", "countdown", countdown));
+    byId("stage-description").textContent = stage.description;
+    const term2 = byId("term2-notice");
+    term2.hidden = !stage.term2Limited;
+    term2.textContent = stage.term2Limited ? COURSE_CONFIG.term2ScheduleNotice : "";
   }
 
-  function renderNextGate(nextGate) {
-    const container = byId("next-gate");
-    container.replaceChildren();
-    if (!nextGate) {
-      container.appendChild(create("p", "next-date next-date-complete", "No future gates"));
-      container.appendChild(create("p", "next-title", "The formal project-gate sequence is complete."));
-      return;
-    }
-    const days = utils.daysBetween(activeDate, nextGate.date);
-    container.appendChild(create("p", "next-date", formatEventDate(nextGate, false)));
-    container.appendChild(create("h3", "next-title", nextGate.title));
-    const badges = create("div", "next-badges");
-    appendEventBadges(badges, nextGate, false);
-    container.appendChild(badges);
-    const countdown = days === 0 ? "Today" : days === 1 ? "1 day away" : days + " days away";
-    container.appendChild(create("p", "countdown", countdown));
-    if (nextGate.context) container.appendChild(create("p", "next-detail", nextGate.context));
-    if (nextGate.pathwayDetail) {
-      const detail = nextGate.pathwayDetail;
-      const label = PROJECT_PATHWAYS[selectedPathway].label + ": " + detail.title + (detail.timeLabel ? " · " + detail.timeLabel : "");
-      container.appendChild(create("p", "next-detail", label));
-      if (detail.statusNote) container.appendChild(create("p", "next-detail", detail.statusNote));
-      if (detail.context) container.appendChild(create("p", "next-detail", detail.context));
-    }
-    if (days >= 0 && days <= 7) {
-      container.appendChild(create("p", "gate-approaching-copy", "Project gate approaching. If this is at risk, communicate before the date so the plan can be adjusted while there is still time."));
-    }
-  }
-
-  function renderBulletList(id, items) {
-    const list = byId(id);
+  function renderProjectSummary() {
+    const list = byId("project-summary-list");
     list.replaceChildren();
-    items.forEach(function (item) { list.appendChild(create("li", null, item)); });
+    utils.getProjectSummary(activeDate, projectState, selectedPathway).forEach(function (item) {
+      const row = create("div", "project-summary-item");
+      row.appendChild(create("dt", null, item.label));
+      const value = create("dd");
+      value.appendChild(create("span", "summary-value", item.value));
+      value.appendChild(create("span", "summary-condition", item.condition));
+      row.appendChild(value);
+      list.appendChild(row);
+    });
   }
-
-  function pathwayIsRelevant() { return activeDate >= COURSE_CONFIG.pathwayRelevantFrom; }
-
-  function currentPathwayState() {
-    return pathwayIsRelevant() ? utils.getPathwayState(selectedPathway, activeDate) : null;
+  function renderDoNow() {
+    const list = byId("do-now-list");
+    list.replaceChildren();
+    utils.getDoNow(activeDate, projectState, selectedPathway).forEach(function (action) {
+      const item = create("li");
+      let sourceClass = "action-source event-type event-type--project-state action-source--state";
+      if (action.type === "project-gate") sourceClass = "action-source gate-badge";
+      else if (action.type === "project-boundary") sourceClass = "action-source boundary-badge";
+      else if (action.type && action.type !== "project-state") sourceClass = "action-source " + eventTypeBadgeClass(action.type);
+      item.appendChild(create("span", sourceClass, action.source));
+      item.appendChild(create("span", "action-text", action.text));
+      list.appendChild(item);
+    });
   }
-
-  function renderProjectCondition(stage) {
-    const panel = byId("pathway-panel");
-    const choice = byId("pathway-choice");
-    const pathwayState = currentPathwayState();
-    const dependencies = (stage.dependencies || []).concat(pathwayState ? (pathwayState.dependencies || []) : []);
-    panel.hidden = !pathwayState && !dependencies.length;
-    if (panel.hidden) return;
-    if (choice) choice.hidden = !pathwayState;
-    byId("pathway-status").textContent = pathwayState ? pathwayState.status : "Current Project Dependency";
-    byId("pathway-guidance").textContent = pathwayState ? pathwayState.guidance : "Some work depends on a course or partner condition before the next project step can proceed.";
-    const dependencyPanel = byId("dependency-panel");
-    dependencyPanel.hidden = !dependencies.length;
-    renderBulletList("dependency-list", dependencies);
-  }
-
-  function renderPositioning(stage, upcoming) {
-    const seasonal = currentSeasonalGuidance(stage);
-    const pathwayState = currentPathwayState();
-    renderBulletList("by-now-list", seasonal && seasonal.byNow ? seasonal.byNow : stage.byNow);
-    const rightNow = (seasonal ? seasonal.rightNow : stage.rightNow).concat(pathwayState ? (pathwayState.rightNow || []) : []).slice(0, 4);
-    renderBulletList("right-now-list", rightNow);
-    const coming = byId("coming-up-list");
-    coming.replaceChildren();
-    if (!upcoming.length) {
-      coming.appendChild(create("li", null, "No further dated course activities."));
-      return;
-    }
+  function renderComingNext(upcoming) {
+    const list = byId("coming-up-list");
+    list.replaceChildren();
+    if (!upcoming.length) { list.appendChild(create("li", null, "No further dated course activities.")); return; }
     upcoming.slice(0, 3).forEach(function (event) {
       const item = create("li");
       item.appendChild(create("span", "coming-date", formatEventDate(event, true) + ":"));
-      const title = create("span", "coming-title", event.shortTitle || event.title);
-      if (event.gate) title.appendChild(document.createTextNode(" · PROJECT GATE"));
+      const title = create("span", "coming-title", event.title);
       item.appendChild(title);
-      coming.appendChild(item);
+      const meta = create("span", "coming-meta");
+      if (event.gate) meta.appendChild(makeBadge("Project gate", "gate-badge"));
+      else meta.appendChild(makeBadge(utils.getTypeLabel(event.type), eventTypeBadgeClass(event.type)));
+      if (event.provisional) meta.appendChild(makeBadge(COURSE_CONFIG.provisionalLabel, "status-badge"));
+      item.appendChild(meta);
+      list.appendChild(item);
     });
   }
-
-  function stageState(stage, currentStage) {
-    if (currentStage.id === "complete") return "completed";
-    if (currentStage.id === "before") return "future";
-    if (stage.id === currentStage.id) return "current";
-    return JOURNEY_STAGE_IDS.indexOf(stage.id) < JOURNEY_STAGE_IDS.indexOf(currentStage.id) ? "completed" : "future";
+  function renderWeeklyDestination() {
+    const destination = utils.getWeeklyDestination(activeDate);
+    const panel = byId("weekly-destination-panel");
+    panel.hidden = !destination;
+    byId("weekly-destination").textContent = destination ? destination.text : "";
+  }
+  function renderBeforeProceed() {
+    const boundary = utils.getBeforeProceed(activeDate, projectState, selectedPathway);
+    const panel = byId("before-proceed-panel");
+    panel.hidden = !boundary;
+    const statusClass = !boundary ? "" : boundary.status === "Blocked" ? " is-blocked" : boundary.status === "Waiting" ? " is-waiting" : boundary.status === "Ready with conditions" ? " is-ready-conditions" : " is-boundary";
+    panel.className = "before-proceed" + statusClass;
+    byId("before-proceed-label").textContent = boundary ? boundary.label : "";
+    byId("before-proceed-text").textContent = boundary ? boundary.text : "";
+    const status = byId("before-proceed-status");
+    status.textContent = boundary && boundary.status ? boundary.status : "";
+    status.hidden = !boundary || !boundary.status;
   }
 
-  function majorDatesForStage(stage) {
-    const events = COURSE_EVENTS.filter(function (event) {
-      return Array.isArray(event.stageIds) && event.stageIds.includes(stage.id) && (event.gate || event.weight || event.type === "presentation");
-    });
-    if (!events.length) {
-      return COURSE_EVENTS.filter(function (event) { return Array.isArray(event.stageIds) && event.stageIds.includes(stage.id); }).slice(0, 2);
-    }
-    return events.map(function (event) { return utils.resolveEventForPathway(event, selectedPathway); }).slice(0, 4);
+  function currentJourneyStage() {
+    return JOURNEY_STAGES.find(function (stage) { return activeDate >= stage.from && activeDate <= stage.until; }) || (activeDate < JOURNEY_STAGES[0].from ? JOURNEY_STAGES[0] : JOURNEY_STAGES[JOURNEY_STAGES.length - 1]);
   }
-
   function renderJourneyDetail(stage) {
     const detail = byId("journey-detail");
     detail.replaceChildren();
-    detail.appendChild(create("h3", null, stage.journeyLabel));
+    detail.appendChild(create("h3", null, stage.label));
     detail.appendChild(create("p", null, stage.description));
-    const events = majorDatesForStage(stage);
-    if (events.length) {
-      const summary = events.map(function (event) { return formatEventDate(event, true) + ": " + event.title; }).join(" · ");
-      detail.appendChild(create("p", "journey-dates", "Major dates — " + summary));
-    }
+    detail.appendChild(create("p", "journey-dates", formatDate(stage.from, { month: "short", day: "numeric", year: undefined }) + " to " + formatDate(stage.until, { month: "short", day: "numeric", year: undefined })));
+    if (stage.gate) detail.appendChild(create("p", "journey-major-gate", "◆ Project gate: " + stage.gate));
+    if (stage.id === "partnership-scoping") detail.appendChild(create("p", "journey-chain", "Emerging project map → Core Commitment → Scope Snapshot → Partner-checked scope"));
+    if (stage.id === "proposal-ethics") detail.appendChild(create("p", "journey-chain", "Project Proposal → Ethics / readiness conditions → Ready for the next stage"));
   }
-
-  function renderJourney(currentStage) {
+  function renderJourney() {
+    const current = currentJourneyStage();
+    if (!selectedJourneyId) selectedJourneyId = current.id;
     const list = byId("journey-list");
-    const stages = JOURNEY_STAGE_IDS.map(function (id) { return COURSE_STAGES.find(function (stage) { return stage.id === id; }); });
-    if (!selectedJourneyId) {
-      selectedJourneyId = JOURNEY_STAGE_IDS.includes(currentStage.id) ? currentStage.id : (currentStage.id === "complete" ? "closeout" : "placement");
-    }
     list.replaceChildren();
-    stages.forEach(function (stage, index) {
-      const state = stageState(stage, currentStage);
+    const currentIndex = JOURNEY_STAGES.findIndex(function (stage) { return stage.id === current.id; });
+    JOURNEY_STAGES.forEach(function (stage, index) {
+      const state = index === currentIndex ? "current" : index < currentIndex ? "completed" : "future";
       const item = create("li", "journey-item " + state + (stage.id === selectedJourneyId ? " selected" : ""));
       const button = create("button", "journey-button");
       button.type = "button";
       button.dataset.stageId = stage.id;
       button.setAttribute("aria-pressed", String(stage.id === selectedJourneyId));
       button.appendChild(create("span", "journey-index", String(index + 1).padStart(2, "0")));
-      button.appendChild(create("span", "journey-label", stage.journeyLabel));
-      const stateText = state === "current" ? "You are here" : state === "completed" ? "✓ Earlier calendar stage" : "Upcoming";
-      button.appendChild(create("span", "journey-state", stateText));
-      if (COURSE_EVENTS.some(function (event) { return event.gate && Array.isArray(event.stageIds) && event.stageIds.includes(stage.id); })) {
-        button.appendChild(create("span", "journey-gate", "◆ Project gate"));
-      }
-      button.addEventListener("click", function () {
-        selectedJourneyId = stage.id;
-        renderJourney(currentStage);
-      });
+      button.appendChild(create("span", "journey-label", stage.label));
+      button.appendChild(create("span", "journey-state", state === "current" ? "You are here" : state === "completed" ? "✓ Earlier course stage" : "Upcoming"));
+      if (stage.gate) button.appendChild(create("span", "journey-gate", "◆ Project gate"));
+      button.addEventListener("click", function () { selectedJourneyId = stage.id; renderJourney(); });
       item.appendChild(button);
       list.appendChild(item);
     });
-    renderJourneyDetail(stages.find(function (stage) { return stage.id === selectedJourneyId; }));
+    renderJourneyDetail(JOURNEY_STAGES.find(function (stage) { return stage.id === selectedJourneyId; }) || current);
   }
-
-  function typeName(type) { return RESOURCE_TYPE_LABELS[type] || type; }
 
   function isValidResourceUrl(url) {
     if (typeof url !== "string" || !url.trim()) return false;
-    try {
-      const parsed = new URL(url);
-      return parsed.protocol === "https:" || parsed.protocol === "http:";
-    } catch (error) {
-      return false;
-    }
+    try { const parsed = new URL(url); return parsed.protocol === "https:" || parsed.protocol === "http:"; } catch (error) { return false; }
   }
-
   function renderResources(stage) {
     const list = byId("resources-list");
     const resources = utils.getResourcesForStage(stage, activeDate, selectedPathway);
-    byId("resources-intro").textContent = "Materials selected for the " + stage.title.toLowerCase() + " stage.";
+    byId("resources-intro").textContent = "A focused set of Canvas materials for the current course stage and confirmed pathway.";
     list.replaceChildren();
     resources.forEach(function (resource) {
       const item = create("li");
-      const resourceType = typeName(resource.type).toUpperCase();
+      const type = (RESOURCE_TYPE_LABELS[resource.type] || resource.type).toUpperCase();
       let content;
       if (isValidResourceUrl(resource.url)) {
         content = create("a", "resource-link");
-        content.href = resource.url;
-        content.target = "_blank";
-        content.rel = "noopener noreferrer";
-        content.setAttribute("aria-label", resource.label + " — " + resourceType + ", opens in a new tab");
+        content.href = resource.url; content.target = "_blank"; content.rel = "noopener noreferrer";
+        content.setAttribute("aria-label", resource.label + " · " + type + ", opens in a new tab");
         content.appendChild(create("span", "resource-label", resource.label));
-        content.appendChild(create("span", "resource-meta", resourceType + " · Open in Canvas (new tab)"));
+        content.appendChild(create("span", "resource-meta", type + " · Open in Canvas (new tab)"));
       } else {
         content = create("div", "resource-unavailable");
         content.appendChild(create("span", "resource-label", resource.label));
-        content.appendChild(create("span", "resource-meta", resourceType + " · Canvas link to be added"));
+        content.appendChild(create("span", "resource-meta", type + " · Canvas link to be added"));
       }
-      item.appendChild(content);
-      list.appendChild(item);
+      item.appendChild(content); list.appendChild(item);
     });
-  }
-
-  function renderEventRow(event) {
-    const item = create("li", "event-row" + (event.gate ? " is-gate" : ""));
-    item.appendChild(create("div", "event-date", formatEventDate(event, true)));
-    const content = create("div", "event-content");
-    content.appendChild(create("h3", null, event.title));
-    const badges = create("div", "event-badges");
-    appendEventBadges(badges, event, true);
-    content.appendChild(badges);
-    if (event.context && (event.gate || event.status || event.type === "break" || event.id === "pulse-2027-01-31")) {
-      content.appendChild(create("p", "event-context", event.context));
-    }
-    item.appendChild(content);
-    return item;
-  }
-
-  function renderUpcoming(upcoming) {
-    const list = byId("upcoming-list");
-    list.replaceChildren();
-    if (!upcoming.length) {
-      const item = create("li", "empty-state", "The formal practicum timeline is complete. There are no further dated course activities.");
-      list.appendChild(item);
-      return;
-    }
-    upcoming.slice(0, 7).forEach(function (event) { list.appendChild(renderEventRow(event)); });
   }
 
   function renderTimeline() {
-    const container = byId("full-timeline");
-    container.replaceChildren();
-    const resolvedEvents = COURSE_EVENTS.map(function (event) { return utils.resolveEventForPathway(event, selectedPathway); });
+    const container = byId("full-timeline"); container.replaceChildren();
     MONTH_KEYS.forEach(function (monthKey, index) {
-      const monthEvents = resolvedEvents.filter(function (event) {
-        return (event.date && event.date.slice(0, 7) === monthKey) || (!event.date && event.month === monthKey);
-      }).slice().sort(function (a, b) {
-        if (!a.date) return 1;
-        if (!b.date) return -1;
-        return a.date.localeCompare(b.date) || a.id.localeCompare(b.id);
+      const monthEvents = COURSE_EVENTS.filter(function (event) { return (event.date && event.date.slice(0, 7) === monthKey) || (!event.date && event.month === monthKey); }).slice().sort(function (a, b) {
+        if (!a.date) return 1; if (!b.date) return -1;
+        return a.date.localeCompare(b.date) || (Number(a.order) || 0) - (Number(b.order) || 0) || a.id.localeCompare(b.id);
       });
-      const section = create("section", "timeline-month");
-      section.appendChild(create("h3", null, MONTH_NAMES[index]));
+      if (!monthEvents.length) return;
+      const section = create("section", "timeline-month"); section.appendChild(create("h3", null, MONTH_NAMES[index]));
       const list = create("ol", "timeline-items");
       monthEvents.forEach(function (event) {
-        const item = create("li", "timeline-item");
+        const item = create("li", "timeline-item timeline-item--" + event.type + (event.gate ? " is-gate" : "") + (event.boundary ? " is-boundary" : ""));
         item.appendChild(create("div", "timeline-date", formatEventDate(event, false)));
-        const content = create("div");
-        content.appendChild(create("div", "timeline-title", event.title));
-        const badges = create("div", "timeline-meta");
-        appendEventBadges(badges, event, true);
-        content.appendChild(badges);
+        const content = create("div"); content.appendChild(create("div", "timeline-title", event.title));
+        const badges = create("div", "timeline-meta"); appendEventBadges(badges, event, true); content.appendChild(badges);
+        if (event.action) content.appendChild(create("p", "timeline-context", "Action: " + event.action));
+        if (event.outcome) content.appendChild(create("p", "timeline-context", "Outcome: " + event.outcome));
         if (event.details) content.appendChild(create("p", "timeline-context", event.details));
-        if (event.location) content.appendChild(create("p", "timeline-context", "Location: " + event.location));
         if (event.context) content.appendChild(create("p", "timeline-context", event.context));
-        item.appendChild(content);
-        list.appendChild(item);
+        if (event.whyNow) content.appendChild(create("p", "why-now", "Why this comes now: " + event.whyNow));
+        item.appendChild(content); list.appendChild(item);
       });
-      section.appendChild(list);
-      container.appendChild(section);
+      section.appendChild(list); container.appendChild(section);
     });
   }
 
-  function readStoredPathway() {
-    try {
-      return utils.normalizePathway(window.localStorage.getItem(COURSE_CONFIG.pathwayStorageKey));
-    } catch (error) {
-      return "not-confirmed";
-    }
+  function readStorage(key, fallback) { try { const value = window.localStorage.getItem(key); return value === null ? fallback : value; } catch (error) { return fallback; } }
+  function writeStorage(key, value) { try { window.localStorage.setItem(key, value); } catch (error) { /* Persistence is optional. */ } }
+  function readProjectState() {
+    try { return utils.normalizeProjectState(JSON.parse(readStorage(COURSE_CONFIG.projectStateStorageKey, "{}"))); } catch (error) { return utils.normalizeProjectState(DEFAULT_PROJECT_STATE); }
   }
-
-  function storePathway(pathwayId) {
-    try {
-      window.localStorage.setItem(COURSE_CONFIG.pathwayStorageKey, pathwayId);
-    } catch (error) {
-      // Local persistence is optional; the Navigator remains fully usable without it.
-    }
+  function renderEthicsStatusOptions() {
+    const select = byId("ethics-select");
+    select.replaceChildren();
+    utils.getEthicsStatusOptions(selectedPathway).forEach(function (item) {
+      const option = create("option", null, item.label);
+      option.value = item.value;
+      select.appendChild(option);
+    });
+    select.value = projectState.ethics;
   }
-
-  function updatePathway(pathwayId, announce) {
-    selectedPathway = utils.normalizePathway(pathwayId);
-    byId("pathway-select").value = selectedPathway;
-    storePathway(selectedPathway);
-    updateDate(activeDate, false);
-    if (announce) byId("date-announcer").textContent = "Project pathway view updated to " + PROJECT_PATHWAYS[selectedPathway].label + ".";
-  }
-
-  function setupPathwaySelector() {
+  function setupStatusControls() {
     const previewPathway = previewMode ? query.get("pathway") : null;
-    selectedPathway = PROJECT_PATHWAYS[previewPathway] ? previewPathway : readStoredPathway();
-    const select = byId("pathway-select");
-    select.value = selectedPathway;
-    select.addEventListener("change", function (event) { updatePathway(event.target.value, true); });
+    selectedPathway = PROJECT_PATHWAYS[previewPathway] ? previewPathway : utils.normalizePathway(readStorage(COURSE_CONFIG.pathwayStorageKey, "not-confirmed"));
+    projectState = readProjectState();
+    if (previewMode) Object.keys(PROJECT_STATE_DEFINITIONS).forEach(function (key) { if (query.get(key)) projectState[key] = query.get(key); });
+    projectState = utils.normalizeProjectStateForPathway(projectState, selectedPathway);
+    if (!previewMode) writeStorage(COURSE_CONFIG.projectStateStorageKey, JSON.stringify(projectState));
+    byId("pathway-select").value = selectedPathway;
+    byId("pathway-select").addEventListener("change", function (event) {
+      const previousPathway = selectedPathway;
+      selectedPathway = utils.normalizePathway(event.target.value);
+      projectState = utils.transitionProjectStateForPathway(projectState, previousPathway, selectedPathway);
+      renderEthicsStatusOptions();
+      writeStorage(COURSE_CONFIG.pathwayStorageKey, selectedPathway);
+      writeStorage(COURSE_CONFIG.projectStateStorageKey, JSON.stringify(projectState));
+      updateDate(activeDate, true);
+    });
+    renderEthicsStatusOptions();
+    Object.keys(PROJECT_STATE_DEFINITIONS).forEach(function (key) {
+      const select = byId(key + "-select"); select.value = projectState[key];
+      select.addEventListener("change", function (event) {
+        projectState[key] = event.target.value; projectState = utils.normalizeProjectStateForPathway(projectState, selectedPathway);
+        writeStorage(COURSE_CONFIG.projectStateStorageKey, JSON.stringify(projectState)); updateDate(activeDate, true);
+      });
+    });
+  }
+  function setupPreview() {
+    if (!previewMode) return;
+    byId("preview-bar").hidden = false;
+    if (utils.isValidDate(query.get("date"))) activeDate = query.get("date");
+    byId("preview-date").addEventListener("change", function (event) { updateDate(event.target.value, true); });
+    byId("today-button").addEventListener("click", function () { updateDate(utils.getVancouverToday(), true); });
+    byId("preview-shortcut").addEventListener("change", function (event) { if (utils.isValidDate(event.target.value)) updateDate(event.target.value, true); });
+  }
+  function setupLogo() {
+    const logo = byId("fnis-logo"); const fallback = byId("fnis-logo-fallback");
+    if (!logo || !fallback) return;
+    logo.addEventListener("load", function () { if (logo.naturalWidth > 0) { logo.hidden = false; fallback.remove(); } });
+    logo.addEventListener("error", function () { logo.hidden = true; fallback.hidden = false; });
+    logo.src = logo.dataset.src;
+  }
+  function setupTimelineToggle() {
+    const details = byId("timeline-details"); const toggle = byId("timeline-toggle"); const action = byId("timeline-action");
+    const sync = function () { const open = Boolean(details.open); toggle.setAttribute("aria-expanded", String(open)); action.textContent = open ? "Hide dates −" : "View all dates +"; };
+    details.addEventListener("toggle", sync); sync();
   }
 
   function updateDate(nextDate, announce) {
     if (!utils.isValidDate(nextDate)) return;
     activeDate = nextDate;
     const stage = utils.getStage(activeDate);
-    const upcoming = utils.getUpcomingEvents(activeDate, 7, selectedPathway);
-    const nextEvent = upcoming[0] || null;
-    const nextGate = utils.getNextGate(activeDate, selectedPathway);
-    renderHero(stage, nextEvent);
-    renderNextGate(nextGate);
-    renderProjectCondition(stage);
-    renderPositioning(stage, upcoming);
-    renderJourney(stage);
-    renderResources(stage);
-    renderUpcoming(upcoming);
-    renderTimeline();
+    const upcoming = utils.getUpcomingEvents(activeDate, 7, selectedPathway, projectState);
+    renderHero(stage);
+    renderProjectSummary(); renderDoNow(); renderComingNext(upcoming); renderBeforeProceed(); renderWeeklyDestination();
+    byId("pathway-panel").hidden = activeDate < "2026-09-25";
+    byId("pathway-choice").hidden = activeDate < COURSE_CONFIG.pathwayRelevantFrom;
+    byId("ethics-principles").hidden = activeDate < COURSE_CONFIG.pathwayRelevantFrom;
+    byId("board-principles").hidden = activeDate < "2026-10-19";
+    renderJourney(); renderResources(stage); renderTimeline();
     if (previewMode) {
       byId("preview-date").value = activeDate;
-      const url = new URL(window.location.href);
-      url.searchParams.set("preview", "1");
-      url.searchParams.set("date", activeDate);
-      url.searchParams.set("pathway", selectedPathway);
+      const url = new URL(window.location.href); url.searchParams.set("preview", "1"); url.searchParams.set("date", activeDate); url.searchParams.set("pathway", selectedPathway);
+      Object.keys(PROJECT_STATE_DEFINITIONS).forEach(function (key) { url.searchParams.set(key, projectState[key]); });
       window.history.replaceState({}, "", url);
     }
-    if (announce) byId("date-announcer").textContent = "Course navigator updated for " + formatDate(activeDate) + ". Current stage: " + stage.title + ".";
+    if (announce) byId("date-announcer").textContent = "Navigator updated for " + formatDate(activeDate) + ". Course stage: " + stage.title + ".";
   }
 
-  function setupPreview() {
-    if (!previewMode) return;
-    byId("preview-bar").hidden = false;
-    const requestedDate = query.get("date");
-    if (utils.isValidDate(requestedDate)) activeDate = requestedDate;
-    byId("preview-date").addEventListener("change", function (event) { updateDate(event.target.value, true); });
-    byId("today-button").addEventListener("click", function () { updateDate(utils.getVancouverToday(), true); });
-    byId("preview-shortcut").addEventListener("change", function (event) {
-      if (utils.isValidDate(event.target.value)) updateDate(event.target.value, true);
-    });
-  }
-
-  function setupFnisLogo() {
-    const logo = byId("fnis-logo");
-    const fallback = byId("fnis-logo-fallback");
-    if (!logo || !fallback) return;
-    logo.addEventListener("load", function () {
-      if (logo.naturalWidth > 0) {
-        logo.hidden = false;
-        fallback.remove();
-      }
-    });
-    logo.addEventListener("error", function () {
-      logo.hidden = true;
-      fallback.hidden = false;
-    });
-    logo.src = logo.dataset.src;
-  }
-
-  function setupTimelineToggle() {
-    const details = byId("timeline-details");
-    const toggle = byId("timeline-toggle");
-    const action = byId("timeline-action");
-    if (!details || !toggle || !action) return;
-    const syncState = function () {
-      const expanded = Boolean(details.open);
-      toggle.setAttribute("aria-expanded", String(expanded));
-      action.textContent = expanded ? "Hide dates −" : "View all dates +";
-    };
-    details.addEventListener("toggle", syncState);
-    syncState();
-  }
-
-  setupFnisLogo();
-  setupPathwaySelector();
-  setupPreview();
-  setupTimelineToggle();
+  setupLogo(); setupStatusControls(); setupPreview(); setupTimelineToggle();
   byId("last-updated").textContent = COURSE_CONFIG.lastUpdated;
   updateDate(activeDate, false);
 })();
